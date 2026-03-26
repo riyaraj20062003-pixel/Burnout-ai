@@ -3,7 +3,6 @@ import {
   Send, 
   Bot, 
   User, 
-  ArrowLeft, 
   Sparkles, 
   MessageSquare,
   RefreshCw,
@@ -13,35 +12,83 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
-import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import DashboardLayout, { DashboardNavItem } from "@/components/layouts/DashboardLayout";
+import { ApiClientError, getChatHistory, sendChatMessage } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   id: string;
   role: "bot" | "user";
   text: string;
   time: string;
+  suggestions?: string[];
 }
 
 export default function ChatbotPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      role: "bot",
-      text: "Hello! I'm your EduRelief AI mental health assistant. How are you feeling today?",
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  ]);
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState("chat");
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const navItems: DashboardNavItem[] = [
+    { id: "overview", icon: Bot, label: "Dashboard", path: "/student/dashboard" },
+    { id: "analysis", icon: Sparkles, label: "Trend Analysis", path: "/student/dashboard" },
+    { id: "chat", icon: MessageSquare, label: "AI Chat Assistant", path: "/chat" },
+    { id: "resources", icon: Bot, label: "Resources", path: "/student/dashboard" },
+  ];
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getChatHistory()
+      .then((history) => {
+        if (!mounted) {
+          return;
+        }
+
+        const mapped: Message[] = history.map((item) => ({
+          id: item.id,
+          role: item.role === "assistant" ? "bot" : "user",
+          text: item.content,
+          time: new Date(item.createdAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        }));
+
+        setMessages(mapped);
+      })
+      .catch((error) => {
+        const message =
+          error instanceof ApiClientError
+            ? error.message
+            : "Could not load Lisa chat history.";
+
+        toast({
+          title: "Chat unavailable",
+          description: message,
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsLoadingHistory(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [toast]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,64 +105,80 @@ export default function ChatbotPage() {
     setInput("");
     setIsTyping(true);
 
-    // Simulate AI Response based on input keywords
-    setTimeout(() => {
-      let responseText = "I understand how you feel. It's important to remember that these feelings are valid. Would you like to try a quick breathing exercise?";
-      
-      const lowerInput = input.toLowerCase();
-      if (lowerInput.includes("stress") || lowerInput.includes("overwhelmed")) {
-        responseText = "I'm sorry you're feeling stressed. High academic loads can be tough. Have you tried breaking your tasks into smaller, 20-minute chunks? This can make them feel much more manageable.";
-      } else if (lowerInput.includes("focus") || lowerInput.includes("concentration")) {
-        responseText = "Focus issues are often linked to cognitive fatigue. I recommend the Pomodoro technique: 25 minutes of work followed by a 5-minute movement break away from your screen.";
-      } else if (lowerInput.includes("tired") || lowerInput.includes("sleep")) {
-        responseText = "Fatigue is a major indicator of burnout risk. Prioritizing consistent sleep cycles is the best first step. Even 15 minutes of earlier rest tonight could help!";
-      }
+    try {
+      const response = await sendChatMessage({
+        message: userMsg.text,
+        history: messages.slice(-8).map((item) => ({
+          role: item.role === "bot" ? "assistant" : "user",
+          content: item.text,
+        })),
+      });
 
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "bot",
-        text: responseText,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        text: response.reply,
+        suggestions: response.suggestions,
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
 
       setMessages(prev => [...prev, botMsg]);
+    } catch (error) {
+      const message =
+        error instanceof ApiClientError
+          ? error.message
+          : "Lisa could not respond right now.";
+
+      toast({
+        title: "Response failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
+  };
+
+  const handleSuggestion = (suggestion: string) => {
+    setInput(suggestion);
   };
 
   return (
-    <div className="min-h-screen gradient-bg flex flex-col h-screen overflow-hidden">
-      {/* Header */}
-      <header className="glass p-4 border-b border-white/20 flex items-center justify-between z-10">
-        <div className="flex items-center space-x-4">
-          <Link to="/student/dashboard" className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-            <ArrowLeft className="w-5 h-5 text-slate-600" />
-          </Link>
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg">
-              <Bot className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">EduAI Assistant</h1>
-              <div className="flex items-center text-xs text-emerald-500 font-bold">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse" />
-                Always here to listen
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="ghost" size="icon" className="text-slate-500"><RefreshCw className="w-4 h-4" /></Button>
-          <Button variant="ghost" size="icon" className="text-slate-500"><MoreVertical className="w-4 h-4" /></Button>
-        </div>
-      </header>
+    <DashboardLayout
+      title="EduAI Assistant"
+      subtitle="Always here to listen"
+      navItems={navItems}
+      activeNavId={activeTab}
+      onNavChange={setActiveTab}
+      signOutPath="/"
+      headerActions={
+        <>
+          <Button variant="ghost" size="icon" className="text-slate-500" aria-label="Refresh chat context">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="text-slate-500" aria-label="Open chat options">
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+        </>
+      }
+    >
+      <div className="-mx-4 -my-8 flex h-[calc(100vh-6rem)] flex-col overflow-hidden px-4 md:-mx-8 md:px-8">
 
       {/* Chat Messages */}
       <div 
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
       >
         <div className="max-w-3xl mx-auto space-y-6">
+          {isLoadingHistory ? (
+            <div className="rounded-2xl border border-white/40 bg-white/50 p-4 text-sm text-slate-600">
+              Loading Lisa conversation context...
+            </div>
+          ) : null}
+
           <div className="flex justify-center mb-8">
             <div className="bg-white/50 backdrop-blur-sm px-4 py-2 rounded-2xl border border-white/30 text-xs text-slate-500 flex items-center shadow-sm">
               <Sparkles className="w-3 h-3 mr-2 text-indigo-400" />
@@ -154,14 +217,33 @@ export default function ChatbotPage() {
                   
                   {msg.role === "bot" && (
                     <div className="absolute -bottom-4 right-0 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 bg-white shadow-sm border border-slate-100"><ThumbsUp className="w-3 h-3 text-slate-400" /></Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 bg-white shadow-sm border border-slate-100"><ThumbsDown className="w-3 h-3 text-slate-400" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 bg-white shadow-sm border border-slate-100" aria-label="Mark Lisa response helpful">
+                        <ThumbsUp className="w-3 h-3 text-slate-400" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 bg-white shadow-sm border border-slate-100" aria-label="Mark Lisa response not helpful">
+                        <ThumbsDown className="w-3 h-3 text-slate-400" />
+                      </Button>
                     </div>
                   )}
                 </div>
                 <span className="text-[10px] text-slate-400 px-2 uppercase font-bold tracking-wider">
                   {msg.time}
                 </span>
+                {msg.role === "bot" && msg.suggestions?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {msg.suggestions.map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => handleSuggestion(suggestion)}
+                        aria-label={`Use suggestion: ${suggestion}`}
+                        className="rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           ))}
@@ -171,10 +253,11 @@ export default function ChatbotPage() {
               <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md flex-shrink-0 mt-1 mr-3">
                 <Bot className="w-5 h-5" />
               </div>
-              <div className="glass p-4 rounded-3xl rounded-tl-none border-white/40 flex space-x-1 items-center">
+              <div className="glass p-4 rounded-3xl rounded-tl-none border-white/40 flex space-x-1 items-center" role="status" aria-live="polite">
                 <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                 <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="sr-only">Lisa is typing</span>
               </div>
             </div>
           )}
@@ -193,6 +276,7 @@ export default function ChatbotPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Tell me how you're feeling..."
+              aria-label="Message Lisa"
               className="w-full h-14 pl-12 pr-4 bg-white/60 border-transparent focus:border-indigo-500 rounded-2xl shadow-inner text-base"
               disabled={isTyping}
             />
@@ -201,6 +285,7 @@ export default function ChatbotPage() {
             type="submit" 
             disabled={!input.trim() || isTyping}
             className="h-14 w-14 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg transition-all duration-300"
+            aria-label="Send message"
           >
             <Send className="w-6 h-6" />
           </Button>
@@ -209,6 +294,7 @@ export default function ChatbotPage() {
           EduRelief AI is not a clinical replacement for professional medical therapy.
         </p>
       </div>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

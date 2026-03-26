@@ -1,25 +1,156 @@
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useParams } from "react-router-dom";
 import { 
-  ArrowLeft, 
-  Construction, 
+  AlertTriangle,
+  CheckCircle2,
   LayoutDashboard, 
+  Loader2,
   Settings, 
   Users, 
-  BookOpen, 
-  BrainCircuit, 
   TrendingUp, 
-  LogOut, 
   Bell,
-  MessageSquare
+  MessageSquare,
+  Shield,
+  Clock3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import DashboardLayout, { DashboardNavItem } from "@/components/layouts/DashboardLayout";
+import { roleTheme } from "@/lib/theme";
+import { ApiClientError, getRoleDashboard } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import type { RoleActionItem, RoleDashboardResponse } from "@shared/api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const ACTIVE_TAB_KEY_PREFIX = "role-dashboard-active-tab";
+const ACTIONS_KEY_PREFIX = "role-dashboard-actions";
+
+type ActionStatusMap = Record<string, RoleActionItem["status"]>;
+
+function loadActionStatusMap(role: "parent" | "mentor"): ActionStatusMap {
+  try {
+    const raw = localStorage.getItem(`${ACTIONS_KEY_PREFIX}:${role}`);
+    if (!raw) {
+      return {};
+    }
+
+    return JSON.parse(raw) as ActionStatusMap;
+  } catch {
+    return {};
+  }
+}
+
+function persistActionStatusMap(role: "parent" | "mentor", actions: RoleActionItem[]): void {
+  const statusMap: ActionStatusMap = actions.reduce((acc, action) => {
+    acc[action.id] = action.status;
+    return acc;
+  }, {} as ActionStatusMap);
+
+  localStorage.setItem(`${ACTIONS_KEY_PREFIX}:${role}`, JSON.stringify(statusMap));
+}
+
+function persistActiveTab(role: "parent" | "mentor", tab: string): void {
+  localStorage.setItem(`${ACTIVE_TAB_KEY_PREFIX}:${role}`, tab);
+}
+
+function loadActiveTab(role: "parent" | "mentor"): string | null {
+  return localStorage.getItem(`${ACTIVE_TAB_KEY_PREFIX}:${role}`);
+}
 
 export default function DashboardPlaceholder() {
+  const { toast } = useToast();
   const { role } = useParams();
-  const navigate = useNavigate();
   const roleTitle = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
+  const normalizedRole = role === "parent" || role === "mentor" ? role : "student";
+  const safeRole = role === "parent" || role === "mentor" ? role : "parent";
+  const [activeTab, setActiveTab] = useState("overview");
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState<RoleDashboardResponse | null>(null);
+  const [localActions, setLocalActions] = useState<RoleActionItem[]>([]);
+  const [notifyByPush, setNotifyByPush] = useState(true);
+  const [notifyByEmail, setNotifyByEmail] = useState(false);
+  const [digestFrequency, setDigestFrequency] = useState("daily");
+
+  useEffect(() => {
+    const savedTab = loadActiveTab(safeRole);
+    if (savedTab) {
+      setActiveTab(savedTab);
+    }
+  }, [safeRole]);
+
+  useEffect(() => {
+    persistActiveTab(safeRole, activeTab);
+  }, [activeTab, safeRole]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    getRoleDashboard(safeRole)
+      .then((data) => {
+        if (!mounted) {
+          return;
+        }
+
+        const savedStatuses = loadActionStatusMap(safeRole);
+        const mergedActions = data.actions.map((action) => {
+          const savedStatus = savedStatuses[action.id];
+          if (!savedStatus) {
+            return action;
+          }
+
+          return {
+            ...action,
+            status: savedStatus,
+          };
+        });
+
+        setDashboardData(data);
+        setLocalActions(mergedActions);
+      })
+      .catch((error) => {
+        if (!mounted) {
+          return;
+        }
+
+        const message =
+          error instanceof ApiClientError
+            ? error.message
+            : "Could not load role dashboard workflow.";
+
+        toast({
+          title: "Dashboard unavailable",
+          description: message,
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [safeRole, toast]);
+
+  useEffect(() => {
+    if (localActions.length === 0) {
+      return;
+    }
+
+    persistActionStatusMap(safeRole, localActions);
+  }, [localActions, safeRole]);
 
   const getRoleTheme = () => {
     switch (role) {
@@ -29,108 +160,385 @@ export default function DashboardPlaceholder() {
     }
   };
 
-  const getRoleIcon = () => {
-    switch (role) {
-      case "parent": return Users;
-      case "mentor": return BookOpen;
-      default: return LayoutDashboard;
+  const navItems: DashboardNavItem[] = [
+    { id: "overview", icon: LayoutDashboard, label: "Overview" },
+    { id: "students", icon: Users, label: safeRole === "mentor" ? "My Students" : "Child Progress" },
+    { id: "messages", icon: MessageSquare, label: "Messages" },
+    { id: "analysis", icon: TrendingUp, label: "Detailed Reports" },
+    { id: "settings", icon: Settings, label: "Settings" },
+  ];
+
+  const highRiskCount = useMemo(
+    () => dashboardData?.students.filter((student) => student.riskLevel === "high").length ?? 0,
+    [dashboardData],
+  );
+
+  const completedActions = localActions.filter((action) => action.status === "done").length;
+  const pendingActions = localActions.filter((action) => action.status !== "done").length;
+
+  const riskSummary = useMemo(() => {
+    const summary = { high: 0, moderate: 0, low: 0 };
+
+    for (const student of dashboardData?.students ?? []) {
+      summary[student.riskLevel] += 1;
     }
+
+    return summary;
+  }, [dashboardData]);
+
+  const topStudents = useMemo(
+    () =>
+      [...(dashboardData?.students ?? [])]
+        .sort((a, b) => b.burnoutScore - a.burnoutScore)
+        .slice(0, 2),
+    [dashboardData],
+  );
+
+  const setActionStatus = (actionId: string, status: RoleActionItem["status"]) => {
+    setLocalActions((prev) =>
+      prev.map((action) =>
+        action.id === actionId ? { ...action, status } : action,
+      ),
+    );
+
+    toast({
+      title: "Action updated",
+      description: status === "done" ? "Workflow action marked as complete." : "Workflow action moved back to queue.",
+    });
   };
 
-  const Icon = getRoleIcon();
+  const quickControls =
+    safeRole === "parent"
+      ? [
+          { id: "parent-checkin", label: "Schedule Family Check-in", detail: "Create a 20-minute low-pressure check-in tonight." },
+          { id: "parent-routine", label: "Apply Sleep Routine", detail: "Share one wind-down action with your child." },
+          { id: "parent-note", label: "Send Encouragement Message", detail: "Send a supportive message focused on wellbeing first." },
+        ]
+      : [
+          { id: "mentor-intervention", label: "Start Intervention Workflow", detail: "Open high-risk student intervention protocol." },
+          { id: "mentor-session", label: "Schedule Support Session", detail: "Set up a focused 1:1 wellbeing session." },
+          { id: "mentor-report", label: "Share Progress Report", detail: "Send a concise trend report to guardians." },
+        ];
+
+  const templateMessages =
+    safeRole === "parent"
+      ? [
+          "I noticed this week has been heavy. Want to plan one small reset tonight?",
+          "No pressure to discuss grades right now, I just want to hear how you feel.",
+        ]
+      : [
+          "You are not behind. Let’s focus on one manageable task for today.",
+          "I can help you rebalance sleep and deadlines this week, starting with two small changes.",
+        ];
+
+  const getRiskBadgeClass = (level: "low" | "moderate" | "high") => {
+    if (level === "high") {
+      return "bg-red-100 text-red-700";
+    }
+
+    if (level === "moderate") {
+      return "bg-amber-100 text-amber-700";
+    }
+
+    return "bg-emerald-100 text-emerald-700";
+  };
 
   return (
-    <div className="min-h-screen gradient-bg flex">
-      {/* Sidebar */}
-      <aside className="w-64 glass border-r border-white/20 hidden md:flex flex-col p-6 space-y-8">
-        <div className="flex items-center space-x-3 mb-4">
-          <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg", getRoleTheme())}>
-            <BrainCircuit className="w-6 h-6" />
-          </div>
-          <span className="text-xl font-bold text-slate-900">EduRelief AI</span>
-        </div>
-
-        <nav className="flex-1 space-y-2">
-          {[
-            { id: "overview", icon: LayoutDashboard, label: "Overview" },
-            { id: "students", icon: Users, label: role === "mentor" ? "My Students" : "Child Progress" },
-            { id: "messages", icon: MessageSquare, label: "Messages" },
-            { id: "analysis", icon: TrendingUp, label: "Detailed Reports" },
-            { id: "settings", icon: Settings, label: "Settings" },
-          ].map((item, i) => (
-            <div
-              key={item.id}
-              className={cn(
-                "w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all duration-300",
-                i === 0 
-                  ? cn("text-white shadow-lg", getRoleTheme())
-                  : "text-slate-600 hover:bg-white/50 hover:text-indigo-600 cursor-not-allowed opacity-50"
-              )}
-            >
-              <item.icon className="w-5 h-5" />
-              <span className="font-semibold">{item.label}</span>
-            </div>
-          ))}
-        </nav>
-
-        <div className="pt-6 border-t border-slate-200">
-          <Link to="/" className="flex items-center space-x-3 px-4 py-3 rounded-2xl text-red-500 hover:bg-red-50 transition-colors font-semibold">
-            <LogOut className="w-5 h-5" />
-            <span>Sign Out</span>
-          </Link>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto max-h-screen flex flex-col items-center justify-center text-center">
-        <header className="absolute top-0 left-0 right-0 p-4 md:p-8 flex justify-between items-center bg-transparent pointer-events-none">
-          <div className="md:ml-64 pointer-events-auto">
-             <h1 className="text-2xl font-bold text-slate-800">{roleTitle} Portal</h1>
-          </div>
-          <div className="pointer-events-auto flex items-center space-x-4">
-             <Button variant="ghost" size="icon" className="glass h-10 w-10 border-white/50"><Bell className="w-5 h-5 text-slate-600" /></Button>
-             <div className="w-10 h-10 rounded-xl glass flex items-center justify-center border border-white/50"><Users className="w-5 h-5 text-slate-400" /></div>
-          </div>
-        </header>
-
-        <div className="max-w-xl space-y-6 p-12 glass rounded-[3rem] border-white/40 shadow-2xl relative overflow-hidden group">
-          <div className={cn("absolute -top-24 -right-24 w-64 h-64 opacity-5 rounded-full", getRoleTheme())} />
-          
-          <div className={cn("w-24 h-24 rounded-3xl mx-auto flex items-center justify-center text-white shadow-2xl mb-8 group-hover:scale-110 transition-transform duration-500", getRoleTheme())}>
-            <Construction className="w-12 h-12" />
-          </div>
-          
-          <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight">Coming Soon</h2>
-          <p className="text-lg text-slate-600 leading-relaxed">
-            The specialized <strong>{roleTitle} Dashboard</strong> is currently under development to ensure perfect monitoring and intervention tools.
-          </p>
-          
-          <div className="grid grid-cols-2 gap-4 mt-8">
-            <div className="p-4 bg-white/40 rounded-2xl border border-white/20 text-left">
-              <h4 className="font-bold text-slate-800 text-sm mb-1 uppercase tracking-wider">Features</h4>
-              <ul className="text-xs text-slate-500 space-y-1">
-                <li>• Real-time risk alerts</li>
-                <li>• Academic trend reports</li>
-                <li>• Secure messaging</li>
-              </ul>
-            </div>
-            <div className="p-4 bg-white/40 rounded-2xl border border-white/20 text-left">
-               <h4 className="font-bold text-slate-800 text-sm mb-1 uppercase tracking-wider">Status</h4>
-               <p className="text-xs text-slate-500 leading-relaxed italic">
-                 Optimizing predictive model integration for multi-user visualization...
-               </p>
-            </div>
-          </div>
-
-          <Button 
-            onClick={() => navigate("/")}
-            className={cn("mt-8 w-full h-14 text-white font-bold rounded-2xl shadow-xl transition-all duration-300", getRoleTheme())}
-          >
-            <ArrowLeft className="w-5 h-5 mr-2" />
-            Back to Home
+    <DashboardLayout
+      title={`${roleTitle} Workflow Dashboard`}
+      subtitle={dashboardData?.summary ?? "Loading role-specific workflow..."}
+      navItems={navItems}
+      activeNavId={activeTab}
+      onNavChange={setActiveTab}
+      signOutPath="/"
+      brandClassName={roleTheme[normalizedRole].solid}
+      headerActions={
+        <>
+          <Button variant="ghost" size="icon" className="glass h-10 w-10 border-white/50">
+            <Bell className="h-5 w-5 text-slate-600" />
           </Button>
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl glass border border-white/50">
+            <Users className="h-5 w-5 text-slate-400" />
+          </div>
+        </>
+      }
+    >
+      {loading ? (
+        <div className="flex min-h-[65vh] items-center justify-center">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/40 bg-white/60 p-4 text-slate-700">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading {roleTitle} workflow...
+          </div>
         </div>
-      </main>
+      ) : !dashboardData ? (
+        <div className="flex min-h-[65vh] items-center justify-center">
+          <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-red-700">
+            Dashboard data unavailable. Please try signing in again.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <section className="space-y-6 lg:col-span-8">
+            {activeTab === "overview" ? (
+              <>
+                <Card className="glass rounded-3xl border-transparent shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-2xl font-bold">{dashboardData.headline}</CardTitle>
+                    <CardDescription>{dashboardData.summary}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <StatPill
+                      icon={<Users className="h-4 w-4" />}
+                      label="Students Monitored"
+                      value={String(dashboardData.students.length)}
+                    />
+                    <StatPill
+                      icon={<AlertTriangle className="h-4 w-4" />}
+                      label="High-Risk Alerts"
+                      value={String(highRiskCount)}
+                    />
+                    <StatPill
+                      icon={<CheckCircle2 className="h-4 w-4" />}
+                      label="Actions Completed"
+                      value={`${completedActions}/${localActions.length}`}
+                    />
+                  </CardContent>
+                </Card>
+
+                <Card className="glass rounded-3xl border-transparent shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-bold">Priority Watchlist</CardTitle>
+                    <CardDescription>Highest-risk students requiring follow-up this cycle.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {topStudents.map((student) => (
+                      <div key={student.studentId} className="rounded-2xl border border-white/50 bg-white/60 p-4">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <p className="font-semibold text-slate-800">{student.name}</p>
+                          <span className={cn("rounded-full px-2 py-1 text-xs font-bold uppercase", getRiskBadgeClass(student.riskLevel))}>
+                            {student.riskLevel}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          Burnout {student.burnoutScore}% · Stress {student.stressLevel}/10 · Sleep {student.sleepHours}h
+                        </p>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </>
+            ) : null}
+
+            {activeTab === "students" ? (
+              <Card className="glass rounded-3xl border-transparent shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-lg font-bold">Student Overview</CardTitle>
+                  <CardDescription>Live workflow statuses for assigned students.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {dashboardData.students.map((student) => (
+                    <div key={student.studentId} className="rounded-2xl border border-white/50 bg-white/60 p-4">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="font-semibold text-slate-800">{student.name}</p>
+                        <span className={cn("rounded-full px-2 py-1 text-xs font-bold uppercase", getRiskBadgeClass(student.riskLevel))}>
+                          {student.riskLevel}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
+                        <p>Burnout: <strong>{student.burnoutScore}%</strong></p>
+                        <p>Stress: <strong>{student.stressLevel}/10</strong></p>
+                        <p>Sleep: <strong>{student.sleepHours}h</strong></p>
+                        <p>Deadlines: <strong>{student.upcomingDeadlineCount}</strong></p>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {activeTab === "messages" ? (
+              <Card className="glass rounded-3xl border-transparent shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-lg font-bold">Message Templates</CardTitle>
+                  <CardDescription>Use these templates for calm, constructive communication.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {templateMessages.map((template) => (
+                    <div key={template} className="rounded-2xl border border-white/50 bg-white/60 p-4">
+                      <p className="text-sm text-slate-700">{template}</p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="mt-3"
+                        onClick={() => {
+                          navigator.clipboard.writeText(template).catch(() => undefined);
+                          toast({ title: "Template copied", description: "Message copied to clipboard." });
+                        }}
+                      >
+                        Copy Message
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {activeTab === "analysis" ? (
+              <Card className="glass rounded-3xl border-transparent shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-lg font-bold">Detailed Risk Analysis</CardTitle>
+                  <CardDescription>Current cohort distribution and intervention pressure.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <StatPill icon={<AlertTriangle className="h-4 w-4" />} label="High Risk" value={String(riskSummary.high)} />
+                  <StatPill icon={<TrendingUp className="h-4 w-4" />} label="Moderate Risk" value={String(riskSummary.moderate)} />
+                  <StatPill icon={<Users className="h-4 w-4" />} label="Low Risk" value={String(riskSummary.low)} />
+                  <StatPill icon={<CheckCircle2 className="h-4 w-4" />} label="Pending Actions" value={String(pendingActions)} />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {activeTab === "settings" ? (
+              <Card className="glass rounded-3xl border-transparent shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-lg font-bold">Workflow Settings</CardTitle>
+                  <CardDescription>Customize role alerts and dashboard digest behavior.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between rounded-xl border border-white/50 bg-white/60 px-4 py-3">
+                    <Label htmlFor="push-alerts" className="text-sm text-slate-700">Push alert notifications</Label>
+                    <Switch id="push-alerts" checked={notifyByPush} onCheckedChange={setNotifyByPush} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl border border-white/50 bg-white/60 px-4 py-3">
+                    <Label htmlFor="email-alerts" className="text-sm text-slate-700">Email escalation summaries</Label>
+                    <Switch id="email-alerts" checked={notifyByEmail} onCheckedChange={setNotifyByEmail} />
+                  </div>
+                  <div className="rounded-xl border border-white/50 bg-white/60 px-4 py-3">
+                    <Label className="mb-2 block text-sm text-slate-700">Digest frequency</Label>
+                    <Select value={digestFrequency} onValueChange={setDigestFrequency}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select digest interval" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily digest</SelectItem>
+                        <SelectItem value="weekly">Weekly digest</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {activeTab !== "messages" && activeTab !== "settings" ? (
+              <Card className="glass rounded-3xl border-transparent shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-lg font-bold">Alerts and Workflow Queue</CardTitle>
+                  <CardDescription>Priority actions for seamless intervention flow.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {localActions.map((action) => (
+                    <div key={action.id} className="rounded-2xl border border-white/50 bg-white/60 p-4">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="font-semibold text-slate-800">{action.title}</p>
+                        <span className={cn(
+                          "rounded-full px-2 py-1 text-[10px] font-bold uppercase",
+                          action.priority === "high"
+                            ? "bg-red-100 text-red-700"
+                            : action.priority === "medium"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-slate-100 text-slate-700",
+                        )}>
+                          {action.priority}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-600">{action.description}</p>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className={cn(
+                          "text-xs font-semibold uppercase",
+                          action.status === "done"
+                            ? "text-emerald-600"
+                            : action.status === "in_progress"
+                              ? "text-indigo-600"
+                              : "text-slate-500",
+                        )}>
+                          {action.status.replace("_", " ")}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setActionStatus(action.id, action.status === "done" ? "pending" : "done")}
+                        >
+                          {action.status === "done" ? "Reopen" : "Mark Complete"}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+          </section>
+
+          <aside className="space-y-6 lg:col-span-4">
+            <Card className="glass rounded-3xl border-transparent shadow-xl">
+              <CardHeader>
+                <CardTitle className="text-lg font-bold">Active Alerts</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {dashboardData.alerts.map((alert) => (
+                  <div key={alert} className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm text-amber-800">
+                    {alert}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="glass rounded-3xl border-transparent shadow-xl">
+              <CardHeader>
+                <CardTitle className="text-lg font-bold">Quick Controls</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {quickControls.map((control, index) => (
+                  <Button
+                    key={control.id}
+                    type="button"
+                    variant={index === 0 ? "default" : "outline"}
+                    className={cn("w-full justify-start", index === 0 && getRoleTheme())}
+                    onClick={() =>
+                      toast({
+                        title: control.label,
+                        description: control.detail,
+                      })
+                    }
+                  >
+                    {index === 0 ? <Shield className="mr-2 h-4 w-4" /> : index === 1 ? <Clock3 className="mr-2 h-4 w-4" /> : <MessageSquare className="mr-2 h-4 w-4" />}
+                    {control.label}
+                  </Button>
+                ))}
+              </CardContent>
+            </Card>
+          </aside>
+        </div>
+      )}
+    </DashboardLayout>
+  );
+}
+
+function StatPill({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/60 bg-white/60 p-4">
+      <div className="mb-2 flex items-center gap-2 text-slate-600">{icon}</div>
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-2xl font-extrabold text-slate-800">{value}</p>
     </div>
   );
 }

@@ -1,10 +1,20 @@
 import { useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { BrainCircuit, Mail, Lock, Loader2, ArrowLeft } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Mail, Lock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import { login, ApiClientError } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
+import CenteredAuthLayout from "@/components/layouts/CenteredAuthLayout";
+import { setAuthSession } from "@/lib/auth";
+
+const MOCK_CREDENTIALS = {
+  student: { email: "student@example.com", password: "password123" },
+  parent: { email: "parent@example.com", password: "password123" },
+  mentor: { email: "mentor@example.com", password: "password123" },
+} as const;
 
 export default function LoginPage() {
   const { role } = useParams();
@@ -12,6 +22,11 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const { toast } = useToast();
+  const safeRole = role === "student" || role === "parent" || role === "mentor"
+    ? role
+    : "student";
+  const demoCreds = MOCK_CREDENTIALS[safeRole];
 
   const roleTitle = role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
 
@@ -20,46 +35,64 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, role })
+      const data = await login({
+        email,
+        password,
+        role: safeRole,
       });
 
-      const data = await response.json();
-      localStorage.setItem("token", data.token);
-      navigate(`/${role}/dashboard`);
+      setAuthSession(data.token, data.user.role);
+
+      toast({
+        title: "Signed in",
+        description: "Welcome back. Redirecting to your dashboard.",
+      });
+
+      navigate(`/${safeRole}/dashboard`);
     } catch (error) {
-      console.error("Login failed:", error);
+      const message = error instanceof ApiClientError
+        ? error.message
+        : "Unable to sign in. Please try again.";
+
+      toast({
+        title: "Sign in failed",
+        description: message,
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen gradient-bg flex flex-col items-center justify-center p-6">
-      <Link to="/" className="absolute top-8 left-8 flex items-center text-slate-600 hover:text-indigo-600 transition-colors">
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to role selection
-      </Link>
-      
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <BrainCircuit className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-            {roleTitle} Login
-          </h1>
-          <p className="text-slate-600 mt-2">
-            Access your personalized EduRelief AI dashboard.
-          </p>
-        </div>
-
-        <Card className="glass border-transparent shadow-2xl rounded-3xl overflow-hidden">
+    <CenteredAuthLayout
+      title={`${roleTitle} Login`}
+      subtitle="Access your personalized EduRelief AI dashboard."
+    >
+      <div className="mx-auto w-full max-w-md">
+        <Card className="border-transparent bg-white/70 shadow-2xl backdrop-blur rounded-3xl overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle>Welcome Back</CardTitle>
             <CardDescription>Enter your credentials to continue.</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-700">
+              <p className="font-semibold">Demo credentials for {safeRole} testing</p>
+              <p>Email: {demoCreds.email}</p>
+              <p>Password: {demoCreds.password}</p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 h-8 text-xs"
+                onClick={() => {
+                  setEmail(demoCreds.email);
+                  setPassword(demoCreds.password);
+                }}
+              >
+                Use Demo Credentials
+              </Button>
+            </div>
+
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email address</Label>
@@ -119,6 +152,6 @@ export default function LoginPage() {
           </CardFooter>
         </Card>
       </div>
-    </div>
+    </CenteredAuthLayout>
   );
 }

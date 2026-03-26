@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { UserCircle, Users, BookOpen, BrainCircuit } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { roleTheme } from "@/lib/theme";
 
 const roles = [
   {
@@ -8,8 +9,7 @@ const roles = [
     title: "Student",
     description: "Track your burnout, get AI tips, and stay balanced.",
     icon: UserCircle,
-    color: "bg-blue-500",
-    gradient: "from-blue-500 to-indigo-600",
+    gradient: roleTheme.student.gradient,
     path: "/login/student"
   },
   {
@@ -17,8 +17,7 @@ const roles = [
     title: "Parent",
     description: "Monitor your child's well-being and communicate with mentors.",
     icon: Users,
-    color: "bg-purple-500",
-    gradient: "from-purple-500 to-pink-600",
+    gradient: roleTheme.parent.gradient,
     path: "/login/parent"
   },
   {
@@ -26,8 +25,7 @@ const roles = [
     title: "Mentor",
     description: "Guide students at risk and analyze stress patterns.",
     icon: BookOpen,
-    color: "bg-emerald-500",
-    gradient: "from-emerald-500 to-teal-600",
+    gradient: roleTheme.mentor.gradient,
     path: "/login/mentor"
   }
 ];
@@ -36,51 +34,53 @@ export default function Index() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen gradient-bg flex flex-col items-center justify-center p-6">
-      <div className="max-w-4xl w-full text-center space-y-8">
-        <div className="space-y-4">
-          <div className="inline-flex items-center justify-center p-3 bg-white/50 backdrop-blur-sm rounded-2xl shadow-sm mb-4">
-            <BrainCircuit className="w-10 h-10 text-indigo-600 mr-2" />
-            <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
+    <div className="relative min-h-screen overflow-hidden gradient-bg px-6 py-10 md:py-16">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(14,165,233,0.14),transparent_35%),radial-gradient(circle_at_85%_10%,rgba(79,70,229,0.18),transparent_35%),radial-gradient(circle_at_50%_100%,rgba(56,189,248,0.10),transparent_40%)]" />
+      <div className="relative mx-auto flex min-h-[85vh] w-full max-w-6xl flex-col justify-center space-y-10">
+        <div className="space-y-4 text-center">
+          <div className="mb-4 inline-flex items-center justify-center rounded-2xl bg-white/70 p-3 shadow-sm backdrop-blur">
+            <BrainCircuit className="mr-2 h-10 w-10 text-indigo-600" />
+            <span className="bg-gradient-to-r from-indigo-700 to-cyan-600 bg-clip-text text-xl font-extrabold text-transparent">
               EduRelief AI
             </span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 md:text-6xl">
             Early Academic Burnout Detection
           </h1>
-          <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+          <p className="mx-auto max-w-3xl text-lg text-slate-600 md:text-xl">
             Harnessing behavioral AI to prevent student burnout before it starts.
             Who are you?
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {roles.map((role) => (
             <button
               key={role.id}
               onClick={() => navigate(role.path)}
-              className="group relative glass p-8 rounded-3xl transition-all duration-300 hover:scale-105 hover:shadow-2xl text-left border-transparent hover:border-white/40 overflow-hidden"
+              className="group relative overflow-hidden rounded-3xl border border-white/40 bg-white/70 p-8 text-left shadow-xl backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl"
+              aria-label={`Continue as ${role.title}`}
             >
               <div className={cn(
-                "absolute top-0 right-0 w-32 h-32 -mr-8 -mt-8 opacity-10 group-hover:opacity-20 transition-opacity rounded-full bg-gradient-to-br",
+                "absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-15 transition-opacity group-hover:opacity-30",
                 role.gradient
               )} />
               
               <div className={cn(
-                "w-14 h-14 rounded-2xl flex items-center justify-center mb-6 shadow-lg text-white bg-gradient-to-br",
+                "mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg",
                 role.gradient
               )}>
-                <role.icon className="w-8 h-8" />
+                <role.icon className="h-8 w-8" />
               </div>
               
-              <h3 className="text-2xl font-bold text-slate-800 mb-2">{role.title}</h3>
-              <p className="text-slate-600 leading-relaxed">
+              <h3 className="mb-2 text-2xl font-bold text-slate-800">{role.title}</h3>
+              <p className="leading-relaxed text-slate-600">
                 {role.description}
               </p>
               
-              <div className="mt-6 flex items-center text-indigo-600 font-semibold group-hover:translate-x-2 transition-transform">
+              <div className="mt-6 flex items-center font-semibold text-indigo-700 transition-transform group-hover:translate-x-2">
                 Get Started
-                <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="ml-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
@@ -88,7 +88,7 @@ export default function Index() {
           ))}
         </div>
 
-        <p className="text-sm text-slate-400 mt-12">
+        <p className="mt-4 text-center text-sm text-slate-500">
           Secure. Confidential. AI-Powered Mental Health Support.
         </p>
       </div>

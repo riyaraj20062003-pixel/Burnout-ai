@@ -1,17 +1,25 @@
 import { RequestHandler } from "express";
-
-interface PredictRequest {
-  sleep_hours: number;
-  study_hours: number;
-  stress_level: number;
-  assignment_load: number;
-  mood: string;
-  social_activity: number;
-  screen_time: number;
-  motivation_level: number;
-}
+import {
+  BurnoutPredictRequest,
+  BurnoutPredictResponse,
+  BurnoutRiskLevel,
+} from "../../shared/api";
+import { burnoutPredictRequestSchema } from "../../shared/validators";
+import { failure, success } from "../lib/http";
+import { addTrendSnapshotForUser } from "../lib/trend-store";
 
 export const handlePredict: RequestHandler = (req, res) => {
+  const parsed = burnoutPredictRequestSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json(
+      failure("VALIDATION_ERROR", "Invalid burnout assessment payload", {
+        issues: parsed.error.issues,
+      }),
+    );
+    return;
+  }
+
   const {
     sleep_hours,
     study_hours,
@@ -21,7 +29,7 @@ export const handlePredict: RequestHandler = (req, res) => {
     social_activity,
     screen_time,
     motivation_level
-  } = req.body as PredictRequest;
+  } = parsed.data as BurnoutPredictRequest;
 
   // Simple logic to mimic a RandomForest (Weighted scoring system)
   // Higher sleep, social, motivation = lower burnout
@@ -41,22 +49,32 @@ export const handlePredict: RequestHandler = (req, res) => {
   // Normalize score between 0 and 100
   score = Math.max(5, Math.min(98, score));
   
-  let level: "low" | "moderate" | "high" = "low";
+  let level: BurnoutRiskLevel = "low";
   if (score > 75) level = "high";
   else if (score > 45) level = "moderate";
 
   // Simulate processing time
   setTimeout(() => {
-    res.json({
+    if (req.user?.sub) {
+      addTrendSnapshotForUser(req.user.sub, {
+        burnout: score,
+        stress: stress_level,
+        sleep: sleep_hours,
+      });
+    }
+
+    const response: BurnoutPredictResponse = {
       burnout_score: Math.round(score),
       risk_level: level,
       recommendations: getRecommendations(level, score),
       insights: getAIInsights(level, score, sleep_hours, stress_level)
-    });
+    };
+
+    res.status(200).json(success(response));
   }, 1000);
 };
 
-function getRecommendations(level: string, score: number) {
+function getRecommendations(level: BurnoutRiskLevel, score: number): string[] {
   if (score > 75) return [
     "Immediate mentor consultation required",
     "Mandatory digital detox for 48 hours",
@@ -76,7 +94,10 @@ function getRecommendations(level: string, score: number) {
   ];
 }
 
-function getAIInsights(level: string, score: number, sleep: number, stress: number) {
+function getAIInsights(level: BurnoutRiskLevel, score: number, sleep: number, stress: number): string {
+  if (level === "high" && score > 85) {
+    return "Critical stress pattern detected. Please request immediate mentor support.";
+  }
   if (sleep < 5) return "Your critical sleep deficit is the primary driver of your high burnout score.";
   if (stress > 8) return "Extremely high stress levels detected without sufficient recovery periods.";
   return `Based on your patterns, you are managing well but should watch your ${stress > 5 ? 'stress' : 'study load'} trends.`;

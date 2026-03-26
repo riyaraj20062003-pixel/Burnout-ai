@@ -9,12 +9,38 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     fs: {
-      allow: ["./client", "./shared"],
+      allow: [".", "./client", "./shared", "./public"],
       deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "server/**"],
     },
   },
   build: {
     outDir: "dist/spa",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return;
+          }
+
+          if (
+            id.includes("@tanstack/react-query") ||
+            id.includes("recharts")
+          ) {
+            return "data-viz";
+          }
+
+          if (
+            id.includes("@radix-ui") ||
+            id.includes("lucide-react") ||
+            id.includes("class-variance-authority")
+          ) {
+            return "ui-kit";
+          }
+
+          return "vendor";
+        },
+      },
+    },
   },
   plugins: [react(), expressPlugin()],
   resolve: {

@@ -11,6 +11,7 @@ import StudentDashboard from "./pages/StudentDashboard";
 import ChatbotPage from "./pages/ChatbotPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import NotFound from "./pages/NotFound";
+import ProtectedRoute from "./components/auth/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -23,9 +24,30 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/login/:role" element={<Login />} />
-          <Route path="/student/dashboard" element={<StudentDashboard />} />
-          <Route path="/chat" element={<ChatbotPage />} />
-          <Route path="/:role/dashboard" element={<DashboardPlaceholder />} />
+          <Route
+            path="/student/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <StudentDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <ChatbotPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/:role/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={["student", "parent", "mentor"]}>
+                <DashboardPlaceholder />
+              </ProtectedRoute>
+            }
+          />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
